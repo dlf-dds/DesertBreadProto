@@ -1,13 +1,39 @@
 # Development environment: simulates a 3-node site (1 CP + 2 MFTs)
-# All nodes run meshd in containers on a shared bridge network.
+# with SPIRE identity and Zenoh data fabric.
 #
 # Usage:
 #   docker compose -f ops/docker/dev-compose.yml up --build
 #
 # This provides a LAN-like environment for testing mDNS discovery,
-# WireGuard overlay, and Zenoh pub/sub without physical hardware.
+# WireGuard overlay, SPIRE identity, and Zenoh pub/sub.
 
 services:
+  # --- SPIRE Server (site CA) ---
+  spire-server:
+    image: ghcr.io/spiffe/spire-server:1.12.1
+    container_name: spire-server
+    hostname: spire-server
+    volumes:
+      - spire-server-data:/opt/spire/data
+      - ./spire-dev/server.conf:/opt/spire/conf/server/server.conf:ro
+    command: ["-config", "/opt/spire/conf/server/server.conf"]
+    networks:
+      mesh-lan:
+        ipv4_address: 172.28.0.2
+
+  # --- Zenoh Router (site CP) ---
+  zenoh-router:
+    image: eclipse/zenoh:1.8.0
+    container_name: zenoh-router
+    hostname: zenoh-router
+    volumes:
+      - ../../config/zenoh/cp-router.json5:/zenoh.json5:ro
+    command: ["-c", "/zenoh.json5"]
+    networks:
+      mesh-lan:
+        ipv4_address: 172.28.0.3
+
+  # --- Command Post node ---
   cp:
     build:
       context: ../..
@@ -23,10 +49,14 @@ services:
     environment:
       - RUST_LOG=info,meshd=debug
     command: ["meshd", "--key-file", "/var/lib/meshd/secret.key", "--no-relay"]
+    depends_on:
+      - spire-server
+      - zenoh-router
     networks:
       mesh-lan:
         ipv4_address: 172.28.0.10
 
+  # --- MFT nodes ---
   mft-01:
     build:
       context: ../..
@@ -40,6 +70,8 @@ services:
     environment:
       - RUST_LOG=info,meshd=debug
     command: ["meshd", "--key-file", "/var/lib/meshd/secret.key", "--no-relay"]
+    depends_on:
+      - spire-server
     networks:
       mesh-lan:
         ipv4_address: 172.28.0.11
@@ -57,6 +89,8 @@ services:
     environment:
       - RUST_LOG=info,meshd=debug
     command: ["meshd", "--key-file", "/var/lib/meshd/secret.key", "--no-relay"]
+    depends_on:
+      - spire-server
     networks:
       mesh-lan:
         ipv4_address: 172.28.0.12
@@ -72,3 +106,4 @@ volumes:
   cp-data:
   mft01-data:
   mft02-data:
+  spire-server-data:

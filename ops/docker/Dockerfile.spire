@@ -1,0 +1,19 @@
+FROM ghcr.io/spiffe/spire-server:1.12.1 AS spire-server
+FROM ghcr.io/spiffe/spire-agent:1.12.1 AS spire-agent
+
+# Multi-stage: final image has both server and agent
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=spire-server /opt/spire/bin/spire-server /usr/local/bin/spire-server
+COPY --from=spire-agent /opt/spire/bin/spire-agent /usr/local/bin/spire-agent
+
+RUN mkdir -p /opt/spire/data /opt/spire/conf /tmp/spire-agent/public
+
+ENTRYPOINT ["/usr/local/bin/spire-server"]
+CMD ["run", "-config", "/opt/spire/conf/server.conf"]
