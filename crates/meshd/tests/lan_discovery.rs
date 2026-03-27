@@ -5,27 +5,12 @@
 
 use iroh::endpoint::presets;
 use iroh::{Endpoint, EndpointAddr, RelayMode, SecretKey, TransportAddr};
+use meshd::overlay_ip::overlay_ip_from_id;
+use meshd::protocol::MESH_ALPN;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::timeout;
-
-const MESH_ALPN: &[u8] = b"desert-bread/mesh/0";
-
-/// Derive overlay IP (duplicated here since meshd is a binary crate)
-fn overlay_ip(id: &iroh::EndpointId) -> std::net::Ipv4Addr {
-    use sha2::{Digest, Sha256};
-    let hash = Sha256::digest(id.as_bytes());
-    let raw = u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]);
-    let mut host = raw & 0x003F_FFFF;
-    let last = host & 0xFF;
-    if last == 0 {
-        host |= 1;
-    } else if last == 255 {
-        host &= !1;
-    }
-    std::net::Ipv4Addr::from(0x6440_0000 | host)
-}
 
 #[tokio::test]
 async fn two_nodes_connect_and_handshake() {
@@ -39,8 +24,8 @@ async fn two_nodes_connect_and_handshake() {
     let id_a = key_a.public();
     let id_b = key_b.public();
 
-    let ip_a = overlay_ip(&id_a);
-    let ip_b = overlay_ip(&id_b);
+    let ip_a = overlay_ip_from_id(&id_a);
+    let ip_b = overlay_ip_from_id(&id_b);
 
     // Use Minimal preset — no DNS, no relay, just local QUIC
     let ep_a = Endpoint::builder(presets::N0DisableRelay)
@@ -143,12 +128,12 @@ async fn overlay_ip_determinism() {
     let key = SecretKey::generate(&mut rand::rng());
     let id = key.public();
 
-    let ip1 = overlay_ip(&id);
-    let ip2 = overlay_ip(&id);
+    let ip1 = overlay_ip_from_id(&id);
+    let ip2 = overlay_ip_from_id(&id);
     assert_eq!(ip1, ip2);
 
     let key2 = SecretKey::generate(&mut rand::rng());
-    let ip3 = overlay_ip(&key2.public());
+    let ip3 = overlay_ip_from_id(&key2.public());
     assert_ne!(ip1, ip3);
 }
 
@@ -156,7 +141,7 @@ async fn overlay_ip_determinism() {
 async fn overlay_ip_always_in_cgnat_range() {
     for _ in 0..200 {
         let key = SecretKey::generate(&mut rand::rng());
-        let ip = overlay_ip(&key.public());
+        let ip = overlay_ip_from_id(&key.public());
         let octets = ip.octets();
         assert_eq!(octets[0], 100);
         assert!(octets[1] >= 64 && octets[1] <= 127);
