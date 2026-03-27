@@ -1,23 +1,17 @@
-mod discovery;
-mod overlay_ip;
-mod peer;
-mod protocol;
-mod wireguard;
-
 use anyhow::Result;
 use clap::Parser;
 use iroh::endpoint::presets;
 use iroh::protocol::Router;
 use iroh::{Endpoint, RelayMode, SecretKey};
+use meshd::discovery;
+use meshd::overlay_ip::overlay_ip_from_id;
+use meshd::peer::{PeerHandshake, PeerTable};
+use meshd::protocol::{MeshProtocol, MESH_ALPN};
+use meshd::wireguard::WgInterface;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
-
-use crate::overlay_ip::overlay_ip_from_id;
-use crate::peer::{PeerHandshake, PeerTable};
-use crate::protocol::{MeshProtocol, MESH_ALPN};
-use crate::wireguard::WgInterface;
 
 #[derive(Parser, Debug)]
 #[command(name = "meshd", about = "iroh-WireGuard bridge daemon")]
