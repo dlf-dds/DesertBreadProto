@@ -1,0 +1,74 @@
+# Development environment: simulates a 3-node site (1 CP + 2 MFTs)
+# All nodes run meshd in containers on a shared bridge network.
+#
+# Usage:
+#   docker compose -f ops/docker/dev-compose.yml up --build
+#
+# This provides a LAN-like environment for testing mDNS discovery,
+# WireGuard overlay, and Zenoh pub/sub without physical hardware.
+
+services:
+  cp:
+    build:
+      context: ../..
+      dockerfile: ops/docker/Dockerfile.meshd
+    container_name: cp-node
+    hostname: cp-node
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
+    volumes:
+      - cp-data:/var/lib/meshd
+    environment:
+      - RUST_LOG=info,meshd=debug
+    command: ["meshd", "--key-file", "/var/lib/meshd/secret.key", "--no-relay"]
+    networks:
+      mesh-lan:
+        ipv4_address: 172.28.0.10
+
+  mft-01:
+    build:
+      context: ../..
+      dockerfile: ops/docker/Dockerfile.meshd
+    container_name: mft-01
+    hostname: mft-01
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - mft01-data:/var/lib/meshd
+    environment:
+      - RUST_LOG=info,meshd=debug
+    command: ["meshd", "--key-file", "/var/lib/meshd/secret.key", "--no-relay"]
+    networks:
+      mesh-lan:
+        ipv4_address: 172.28.0.11
+
+  mft-02:
+    build:
+      context: ../..
+      dockerfile: ops/docker/Dockerfile.meshd
+    container_name: mft-02
+    hostname: mft-02
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - mft02-data:/var/lib/meshd
+    environment:
+      - RUST_LOG=info,meshd=debug
+    command: ["meshd", "--key-file", "/var/lib/meshd/secret.key", "--no-relay"]
+    networks:
+      mesh-lan:
+        ipv4_address: 172.28.0.12
+
+networks:
+  mesh-lan:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  cp-data:
+  mft01-data:
+  mft02-data:

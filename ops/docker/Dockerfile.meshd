@@ -1,0 +1,23 @@
+FROM rust:1.85-bookworm AS builder
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock* ./
+COPY crates/ crates/
+
+RUN cargo build --release --bin meshd
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wireguard-tools \
+    iproute2 \
+    iptables \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/meshd /usr/local/bin/meshd
+
+RUN mkdir -p /var/lib/meshd
+
+ENTRYPOINT ["meshd"]
+CMD ["--key-file", "/var/lib/meshd/secret.key"]

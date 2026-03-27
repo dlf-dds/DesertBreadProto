@@ -1,0 +1,16 @@
+# Copy to .envrc and .envrc.local, then run: direnv allow
+# .envrc — non-secret config (can be committed if desired)
+# .envrc.local — secrets (NEVER committed)
+
+# --- Non-secret (.envrc) ---
+export AWS_DEFAULT_REGION=eu-central-1
+export AWS_VAULT_KEYCHAIN_NAME=login
+export AWS_SDK_LOAD_CONFIG=1
+export CF_ZONE=desertbread.net
+export CF_ACCOUNT_ID=507423f1d79e8924f0b2bdaf2711db1b
+
+# --- Secrets (.envrc.local) ---
+# export CLOUDFLARE_API_TOKEN=cfut_...
+# export CF_ZT_API_TOKEN=cfut_...
+# export CF_ZT_CLIENT_ID=...
+# export CF_ZT_CLIENT_SECRET=...

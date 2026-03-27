@@ -1,0 +1,15 @@
+// Zenoh configuration for Mission Functional Terminal (MFT) node
+// Lightweight client — pub/sub only, no storage, no routing
+{
+  mode: "client",
+  connect: {
+    endpoints: [],  // Populated by meshd or provisioning — connects to CP router
+  },
+  scouting: {
+    multicast: {
+      enabled: true,
+      address: "224.0.0.224:7446",
+      interface: "auto",
+    },
+  },
+}

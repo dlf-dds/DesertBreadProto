@@ -1,0 +1,41 @@
+// Zenoh configuration for Command Post (CP) node
+// Runs a full router with local storage for site data
+{
+  mode: "router",
+  listen: {
+    endpoints: [
+      "tcp/[::]:7447",
+      "udp/[::]:7447",
+    ],
+  },
+  scouting: {
+    multicast: {
+      enabled: true,
+      address: "224.0.0.224:7446",
+      interface: "auto",
+    },
+  },
+  // Storage for site-local data (anti-entropy reconciliation)
+  plugins: {
+    storage_manager: {
+      storages: {
+        site_data: {
+          key_expr: "${SITE_NAME}/**",
+          volume: {
+            id: "memory",
+          },
+        },
+      },
+    },
+  },
+  transport: {
+    unicast: {
+      // mTLS with SPIRE-issued certs (Phase 2)
+      // tls: {
+      //   root_ca_certificate: "/var/run/spire/agent/certs/bundle.pem",
+      //   server_certificate: "/var/run/spire/agent/certs/svid.pem",
+      //   server_private_key: "/var/run/spire/agent/certs/svid_key.pem",
+      // },
+    },
+  },
+}

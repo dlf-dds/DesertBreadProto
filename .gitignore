@@ -1,0 +1,42 @@
+# Secrets
+.env
+.env.local
+.envrc
+.envrc.local
+*.pem
+*.key
+*.crt
+!config/**/*.example
+
+# Rust
+/target
+**/*.rs.bk
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl
+
+# Operations
+ops/snapshots/
+ops/restore-tmp/
+ops/ansible/inventory.ini
+
+# Docker volumes
+data/
+
+# Claude Code
+.claude/settings.local.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

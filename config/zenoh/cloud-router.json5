@@ -1,0 +1,27 @@
+// Zenoh configuration for cloud aggregation router
+// Collects cross-site data when sites are connected
+{
+  mode: "router",
+  listen: {
+    endpoints: [
+      "tcp/[::]:7447",
+    ],
+  },
+  scouting: {
+    multicast: {
+      enabled: false,  // No multicast in cloud
+    },
+  },
+  plugins: {
+    storage_manager: {
+      storages: {
+        global_data: {
+          key_expr: "*/c2/tracks/**",
+          volume: {
+            id: "memory",
+          },
+        },
+      },
+    },
+  },
+}
