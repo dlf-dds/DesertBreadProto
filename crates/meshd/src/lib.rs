@@ -1,4 +1,5 @@
 pub mod discovery;
+pub mod ipc;
 pub mod overlay_ip;
 pub mod peer;
 pub mod protocol;

@@ -7,6 +7,7 @@ use meshd::discovery;
 use meshd::overlay_ip::overlay_ip_from_id;
 use meshd::peer::{PeerHandshake, PeerTable};
 use meshd::protocol::{MeshProtocol, MESH_ALPN};
+use meshd::ipc::{self, NodeIdentity};
 use meshd::wireguard::WgInterface;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,6 +36,10 @@ struct Args {
     /// Custom relay URLs (comma-separated)
     #[arg(long, value_delimiter = ',')]
     relay_urls: Vec<String>,
+
+    /// IPC socket path for fabric-cli queries
+    #[arg(long, default_value = "/var/run/meshd/meshd.sock")]
+    ipc_socket: String,
 
     /// Log level
     #[arg(long, default_value = "info")]
@@ -139,7 +144,7 @@ async fn main() -> Result<()> {
     // 5. Build protocol handler
     let peers = PeerTable::new();
     let local_handshake = PeerHandshake {
-        wg_pubkey,
+        wg_pubkey: wg_pubkey.clone(),
         overlay_ip,
         wg_endpoint: None, // Will be updated when we know our external endpoint
     };
@@ -163,7 +168,23 @@ async fn main() -> Result<()> {
         }
     });
 
-    // 8. Status logging loop
+    // 8. Start IPC server for fabric-cli
+    let ipc_identity = NodeIdentity {
+        node_id: endpoint.id().to_string(),
+        overlay_ip: overlay_ip.to_string(),
+        wg_pubkey: wg_pubkey.clone(),
+        wg_interface: args.wg_interface.clone(),
+        spire_enabled: false,
+    };
+    let ipc_peers = peers.clone();
+    let ipc_socket = args.ipc_socket.clone();
+    let ipc_handle = tokio::spawn(async move {
+        if let Err(e) = ipc::run_ipc_server(&ipc_socket, ipc_peers, ipc_identity).await {
+            warn!(error = %e, "IPC server ended");
+        }
+    });
+
+    // 9. Status logging loop
     let peers_clone = peers.clone();
     let status_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
@@ -194,6 +215,7 @@ async fn main() -> Result<()> {
     // Cleanup
     mdns_handle.abort();
     status_handle.abort();
+    ipc_handle.abort();
     router.shutdown().await?;
 
     // Teardown WireGuard
