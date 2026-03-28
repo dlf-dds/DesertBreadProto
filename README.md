@@ -40,6 +40,7 @@ graph TB
 
     ZENOH -->|"mTLS"| SPIRE
     ZENOH -->|"runs over"| WG
+    SPIRE -->|"validates peers"| MESHD
     MESHD -->|"manages"| WG
     IROH -->|"keys exchanged via"| MESHD
     IROH -->|"discovers"| MDNS
@@ -69,9 +70,11 @@ graph TB
 ├──────────────────────────────────────────────────────────────────────┤
 │  IDENTITY PLANE (SPIRE/SPIFFE + Kanidm)                              │
 │  Per-site sovereign CA with federation · mTLS everywhere             │
+│  Secures ALL planes: Zenoh mTLS, WG peer validation, human auth     │
 ├──────────────────────────────────────────────────────────────────────┤
 │  IP OVERLAY PLANE (WireGuard)                                        │
 │  Raw kernel WireGuard · peers managed dynamically by meshd           │
+│  SPIRE validates peer SVID before meshd adds WG peer entry          │
 │  Deterministic IPs from public key (100.64.0.0/10 CGNAT)            │
 ├──────────────────────────────────────────────────────────────────────┤
 │  CONNECTION PLANE (iroh)                                             │
