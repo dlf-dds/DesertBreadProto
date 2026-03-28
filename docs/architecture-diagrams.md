@@ -61,11 +61,6 @@ graph TB
         NORM["NORM Multicast<br/>Bulk LAN distribution<br/>FEC loss recovery"]
     end
 
-    subgraph IDENTITY["IDENTITY PLANE"]
-        SPIRE_SITE["SPIRE Server (per-site)<br/>X.509-SVID issuance<br/>Sovereign CA"]
-        KANIDM["Kanidm<br/>Human operator auth<br/>OAuth2/OIDC"]
-    end
-
     subgraph OVERLAY["IP OVERLAY PLANE"]
         WG["WireGuard (wg0)<br/>Kernel tunnel interface<br/>Deterministic IPs (100.64.0.0/10)"]
         MESHD_WG["meshd<br/>Dynamic peer management<br/>add/remove tunnel peers"]
@@ -77,14 +72,22 @@ graph TB
         RELAY_LOCAL["Local Relay<br/>LAN fallback"]
     end
 
-    ZENOH -->|"mTLS via SPIRE certs"| SPIRE_SITE
+    subgraph IDENTITY["IDENTITY PLANE (cross-cutting — secures all planes)"]
+        SPIRE_SITE["SPIRE Server (per-site)<br/>X.509-SVID issuance<br/>Sovereign CA"]
+        KANIDM["Kanidm<br/>Human operator auth<br/>OAuth2/OIDC"]
+    end
+
     ZENOH -->|"runs over"| WG
     NORM -->|"UDP multicast"| WG
-    SPIRE_SITE -->|"validates peers<br/>before WG add"| MESHD_WG
     WG -->|"peers managed by"| MESHD_WG
     MESHD_WG -->|"keys exchanged via"| IROH
     IROH -->|"discovers peers"| MDNS
     IROH -.->|"NAT traversal<br/>when direct P2P fails"| RELAY_FRA
+
+    SPIRE_SITE -->|"mTLS certs"| ZENOH
+    SPIRE_SITE -->|"validates peer SVID<br/>before tunnel add"| MESHD_WG
+    SPIRE_SITE -->|"workload attestation<br/>over iroh QUIC"| IROH
+    KANIDM -->|"operator auth<br/>for dashboards"| ZENOH
 
     SPIRE_SITE -.->|"federation<br/>when connected"| SPIRE_CLOUD
     ZENOH -.->|"cross-site sync<br/>when connected"| ZENOH_CLOUD

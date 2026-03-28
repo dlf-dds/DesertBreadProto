@@ -1,5 +1,6 @@
-# Generated exports
+# Generated exports (from markdown)
 *.pdf
+*.docx
 
 # Secrets
 .env

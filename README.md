@@ -23,11 +23,6 @@ graph TB
         NORM["NORM Multicast (LAN)"]
     end
 
-    subgraph IDENTITY["IDENTITY PLANE"]
-        SPIRE["SPIRE (per-site CA)"]
-        KANIDM["Kanidm (human auth)"]
-    end
-
     subgraph OVERLAY["IP OVERLAY PLANE"]
         WG["WireGuard (wg0)<br/>100.64.0.0/10"]
         MESHD["meshd<br/>dynamic peer mgmt"]
@@ -38,13 +33,22 @@ graph TB
         MDNS["mDNS Discovery"]
     end
 
-    ZENOH -->|"mTLS"| SPIRE
+    subgraph IDENTITY["IDENTITY PLANE (cross-cutting)"]
+        SPIRE["SPIRE (per-site CA)"]
+        KANIDM["Kanidm (human auth)"]
+    end
+
     ZENOH -->|"runs over"| WG
-    SPIRE -->|"validates peers"| MESHD
     MESHD -->|"manages"| WG
     IROH -->|"keys exchanged via"| MESHD
     IROH -->|"discovers"| MDNS
     IROH -.->|"relay fallback"| RELAY
+
+    SPIRE -->|"mTLS certs"| ZENOH
+    SPIRE -->|"validates peers"| MESHD
+    SPIRE -->|"attestation"| IROH
+    KANIDM -->|"operator auth"| ZENOH
+
     SPIRE -.->|"federation"| SPIRE_C
     ZENOH -.->|"cross-site sync"| ZENOH_C
 
