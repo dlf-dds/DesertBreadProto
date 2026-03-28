@@ -41,7 +41,7 @@ pub enum IpcResponse {
         node_id: String,
         overlay_ip: String,
         peer_count: usize,
-        wg_interface: String,
+        tunnel_interface: String,
         spire_enabled: bool,
     },
     #[serde(rename = "peers")]
@@ -50,7 +50,7 @@ pub enum IpcResponse {
     Identity {
         node_id: String,
         overlay_ip: String,
-        wg_pubkey: String,
+        tunnel_pubkey: String,
     },
     #[serde(rename = "error")]
     Error { message: String },
@@ -60,7 +60,7 @@ pub enum IpcResponse {
 pub struct IpcPeerInfo {
     pub node_id: String,
     pub overlay_ip: String,
-    pub wg_pubkey: String,
+    pub tunnel_pubkey: String,
     pub connected: bool,
 }
 
@@ -69,8 +69,8 @@ pub struct IpcPeerInfo {
 pub struct NodeIdentity {
     pub node_id: String,
     pub overlay_ip: String,
-    pub wg_pubkey: String,
-    pub wg_interface: String,
+    pub tunnel_pubkey: String,
+    pub tunnel_interface: String,
     pub spire_enabled: bool,
 }
 
@@ -132,7 +132,7 @@ async fn handle_request(
                 node_id: identity.node_id.clone(),
                 overlay_ip: identity.overlay_ip.clone(),
                 peer_count: count,
-                wg_interface: identity.wg_interface.clone(),
+                tunnel_interface: identity.tunnel_interface.clone(),
                 spire_enabled: identity.spire_enabled,
             }
         }
@@ -143,7 +143,7 @@ async fn handle_request(
                 .map(|p| IpcPeerInfo {
                     node_id: p.endpoint_id.to_string(),
                     overlay_ip: p.overlay_ip.to_string(),
-                    wg_pubkey: p.wg_pubkey,
+                    tunnel_pubkey: p.tunnel_pubkey,
                     connected: p.connected,
                 })
                 .collect();
@@ -152,7 +152,7 @@ async fn handle_request(
         IpcRequest::Identity => IpcResponse::Identity {
             node_id: identity.node_id.clone(),
             overlay_ip: identity.overlay_ip.clone(),
-            wg_pubkey: identity.wg_pubkey.clone(),
+            tunnel_pubkey: identity.tunnel_pubkey.clone(),
         },
     }
 }

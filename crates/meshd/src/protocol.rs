@@ -1,10 +1,13 @@
 //! Mesh protocol handler for iroh connections.
 //!
 //! Implements the ProtocolHandler trait to accept incoming peer connections,
-//! exchange WireGuard keys and overlay IPs, and manage the peer lifecycle.
+//! exchange tunnel keys and overlay IPs, and manage the peer lifecycle.
+//!
+//! This module is tunnel-agnostic — it interacts with the tunnel through
+//! [`TunnelDriver`](crate::tunnel::TunnelDriver), never through a concrete type.
 
 use crate::peer::{PeerHandshake, PeerTable};
-use crate::wireguard::WgInterface;
+use crate::tunnel::TunnelDriver;
 use anyhow::Result;
 use iroh::endpoint::Connection;
 use iroh::protocol::{AcceptError, ProtocolHandler};
@@ -16,23 +19,28 @@ use tracing::{debug, warn};
 pub const MESH_ALPN: &[u8] = b"desert-bread/mesh/0";
 
 /// Protocol handler for mesh peer connections.
+///
+/// Holds the peer table, local handshake info, and an optional tunnel driver.
+/// The tunnel is `Option` because `meshd` can run without a tunnel (e.g., if
+/// WireGuard setup fails on a dev machine) — it still does peer discovery and
+/// handshake, just without configuring IP tunnel routes.
 #[derive(Debug, Clone)]
 pub struct MeshProtocol {
     pub peers: PeerTable,
     pub local_handshake: Arc<RwLock<PeerHandshake>>,
-    pub wg: Arc<RwLock<Option<WgInterface>>>,
+    pub tunnel: Option<Arc<dyn TunnelDriver>>,
 }
 
 impl MeshProtocol {
     pub fn new(
         peers: PeerTable,
         local_handshake: PeerHandshake,
-        wg: Arc<RwLock<Option<WgInterface>>>,
+        tunnel: Option<Arc<dyn TunnelDriver>>,
     ) -> Self {
         Self {
             peers,
             local_handshake: Arc::new(RwLock::new(local_handshake)),
-            wg,
+            tunnel,
         }
     }
 
@@ -53,33 +61,31 @@ impl MeshProtocol {
         let response = recv.read_to_end(4096).await?;
         let remote_hs: PeerHandshake = postcard::from_bytes(&response)?;
 
-        // Register peer and configure WireGuard
+        // Register peer and configure tunnel
         let is_new = self.peers.upsert(remote_id, remote_hs.clone()).await;
         if is_new {
-            self.configure_wg_peer(&remote_hs).await;
+            self.configure_tunnel_peer(&remote_hs).await;
         }
 
         Ok(())
     }
 
-    /// Configure a WireGuard peer entry from a handshake.
-    async fn configure_wg_peer(&self, hs: &PeerHandshake) {
-        let wg_guard = self.wg.read().await;
-        if let Some(ref wg) = *wg_guard {
+    /// Configure a tunnel peer entry from a handshake.
+    async fn configure_tunnel_peer(&self, hs: &PeerHandshake) {
+        if let Some(ref tunnel) = self.tunnel {
             if let Err(e) =
-                wg.add_peer(&hs.wg_pubkey, hs.wg_endpoint.as_deref(), hs.overlay_ip)
+                tunnel.add_peer(&hs.tunnel_pubkey, hs.tunnel_endpoint.as_deref(), hs.overlay_ip)
             {
-                warn!(error = %e, peer_wg = %hs.wg_pubkey, "failed to add WireGuard peer");
+                warn!(error = %e, peer = %hs.tunnel_pubkey, "failed to add tunnel peer");
             }
         }
     }
 
-    /// Remove a WireGuard peer entry.
-    pub async fn remove_wg_peer(&self, wg_pubkey: &str) {
-        let wg_guard = self.wg.read().await;
-        if let Some(ref wg) = *wg_guard {
-            if let Err(e) = wg.remove_peer(wg_pubkey) {
-                warn!(error = %e, peer_wg = wg_pubkey, "failed to remove WireGuard peer");
+    /// Remove a tunnel peer entry.
+    pub async fn remove_tunnel_peer(&self, tunnel_pubkey: &str) {
+        if let Some(ref tunnel) = self.tunnel {
+            if let Err(e) = tunnel.remove_peer(tunnel_pubkey) {
+                warn!(error = %e, peer = tunnel_pubkey, "failed to remove tunnel peer");
             }
         }
     }
@@ -116,10 +122,10 @@ impl ProtocolHandler for MeshProtocol {
             .await
             .ok();
 
-        // Register peer and configure WireGuard
+        // Register peer and configure tunnel
         let is_new = self.peers.upsert(remote_id, remote_hs.clone()).await;
         if is_new {
-            self.configure_wg_peer(&remote_hs).await;
+            self.configure_tunnel_peer(&remote_hs).await;
         }
 
         Ok(())

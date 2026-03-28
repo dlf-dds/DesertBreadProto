@@ -4,14 +4,14 @@ use iroh::endpoint::presets;
 use iroh::protocol::Router;
 use iroh::{Endpoint, RelayMode, SecretKey};
 use meshd::discovery;
+use meshd::ipc::{self, NodeIdentity};
 use meshd::overlay_ip::overlay_ip_from_id;
 use meshd::peer::{PeerHandshake, PeerTable};
 use meshd::protocol::{MeshProtocol, MESH_ALPN};
-use meshd::ipc::{self, NodeIdentity};
+use meshd::tunnel::TunnelDriver;
 use meshd::wireguard::WgInterface;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
@@ -117,39 +117,43 @@ async fn main() -> Result<()> {
     let addr = endpoint.addr();
     info!(id = %endpoint.id(), addr = ?addr, "iroh endpoint online");
 
-    // 4. Set up WireGuard interface
-    let wg = match WgInterface::setup(&args.wg_interface, args.wg_port, overlay_ip) {
-        Ok(wg) => {
-            info!(
-                interface = %wg.name,
-                wg_pubkey = %wg.keypair.public_key,
-                overlay_ip = %wg.overlay_ip,
-                "WireGuard interface configured"
-            );
-            Some(wg)
-        }
-        Err(e) => {
-            warn!(error = %e, "WireGuard setup failed (continuing without WG)");
-            None
-        }
-    };
+    // 4. Set up tunnel interface (currently WireGuard, see tunnel.rs for alternatives)
+    let tunnel: Option<Arc<dyn TunnelDriver>> =
+        match WgInterface::setup(&args.wg_interface, args.wg_port, overlay_ip) {
+            Ok(wg) => {
+                info!(
+                    interface = wg.interface_name(),
+                    tunnel_pubkey = wg.public_key(),
+                    overlay_ip = %wg.overlay_ip(),
+                    "tunnel interface configured (WireGuard)"
+                );
+                Some(Arc::new(wg))
+            }
+            Err(e) => {
+                warn!(error = %e, "tunnel setup failed (continuing without tunnel)");
+                None
+            }
+        };
 
-    let wg_pubkey = wg
+    let tunnel_pubkey = tunnel
         .as_ref()
-        .map(|w| w.keypair.public_key.clone())
+        .map(|t| t.public_key().to_string())
         .unwrap_or_else(|| "none".to_string());
 
-    let wg = Arc::new(RwLock::new(wg));
+    let tunnel_interface = tunnel
+        .as_ref()
+        .map(|t| t.interface_name().to_string())
+        .unwrap_or_else(|| "none".to_string());
 
     // 5. Build protocol handler
     let peers = PeerTable::new();
     let local_handshake = PeerHandshake {
-        wg_pubkey: wg_pubkey.clone(),
+        tunnel_pubkey: tunnel_pubkey.clone(),
         overlay_ip,
-        wg_endpoint: None, // Will be updated when we know our external endpoint
+        tunnel_endpoint: None, // Will be updated when we know our external endpoint
     };
 
-    let mesh_protocol = MeshProtocol::new(peers.clone(), local_handshake, wg.clone());
+    let mesh_protocol = MeshProtocol::new(peers.clone(), local_handshake, tunnel.clone());
 
     // 6. Start the iroh router (accepts incoming connections)
     let endpoint = Arc::new(endpoint);
@@ -172,8 +176,8 @@ async fn main() -> Result<()> {
     let ipc_identity = NodeIdentity {
         node_id: endpoint.id().to_string(),
         overlay_ip: overlay_ip.to_string(),
-        wg_pubkey: wg_pubkey.clone(),
-        wg_interface: args.wg_interface.clone(),
+        tunnel_pubkey: tunnel_pubkey.clone(),
+        tunnel_interface,
         spire_enabled: false,
     };
     let ipc_peers = peers.clone();
@@ -207,7 +211,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    // 9. Wait for shutdown
+    // 10. Wait for shutdown
     info!("meshd running — press Ctrl+C to stop");
     tokio::signal::ctrl_c().await?;
     info!("shutting down...");
@@ -218,10 +222,11 @@ async fn main() -> Result<()> {
     ipc_handle.abort();
     router.shutdown().await?;
 
-    // Teardown WireGuard
-    let wg_guard = wg.read().await;
-    if let Some(ref wg_iface) = *wg_guard {
-        wg_iface.teardown().ok();
+    // Teardown tunnel
+    if let Some(ref t) = tunnel {
+        if let Err(e) = t.teardown() {
+            warn!(error = %e, "tunnel teardown failed");
+        }
     }
 
     info!("meshd stopped");

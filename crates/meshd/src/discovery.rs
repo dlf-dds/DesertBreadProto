@@ -66,7 +66,7 @@ pub async fn run_mdns_discovery(
             DiscoveryEvent::Expired { endpoint_id } => {
                 info!(peer = %endpoint_id, "mDNS: peer expired");
                 if let Some(peer_info) = protocol.peers.mark_disconnected(&endpoint_id).await {
-                    protocol.remove_wg_peer(&peer_info.wg_pubkey).await;
+                    protocol.remove_tunnel_peer(&peer_info.tunnel_pubkey).await;
                 }
             }
         }

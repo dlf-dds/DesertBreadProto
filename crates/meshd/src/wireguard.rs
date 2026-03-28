@@ -1,15 +1,25 @@
-//! WireGuard interface management via shell commands.
+//! WireGuard tunnel driver — the default [`TunnelDriver`] implementation.
 //!
-//! Manages the wg0 interface: creation, keypair generation, peer add/remove/update.
-//! Uses `wg` and `ip` CLI tools rather than kernel netlink to keep things simple
-//! and auditable.
+//! Manages a kernel WireGuard interface via `wg` and `ip` CLI tools (not netlink),
+//! keeping operations simple, auditable, and easy to debug in the field.
+//!
+//! On Linux, this creates real WireGuard interfaces. On macOS (dev mode), all
+//! interface operations are no-ops that log what they would do — this lets you
+//! run `meshd` locally for development without root or a WireGuard kernel module.
+//!
+//! # Relationship to [`TunnelDriver`]
+//!
+//! This is the production implementation of [`crate::tunnel::TunnelDriver`].
+//! The mesh protocol never calls `WgInterface` methods directly — it goes through
+//! the trait. If you're adding a new tunnel technology, use this as your reference
+//! implementation and see [`crate::tunnel`] for the full design rationale.
 
+use crate::overlay_ip;
+use crate::tunnel::TunnelDriver;
 use std::net::Ipv4Addr;
 use std::process::Command;
 use thiserror::Error;
 use tracing::{debug, info, warn};
-
-use crate::overlay_ip;
 
 #[derive(Error, Debug)]
 pub enum WgError {
@@ -73,6 +83,10 @@ pub fn generate_keypair() -> Result<WgKeypair, WgError> {
 impl WgInterface {
     /// Create and configure the WireGuard interface.
     ///
+    /// This is the driver-specific constructor — not part of `TunnelDriver` because
+    /// each driver has its own setup parameters. After calling this, wrap the result
+    /// in `Arc<dyn TunnelDriver>` and pass it to `MeshProtocol::new()`.
+    ///
     /// On macOS (dev), this is a no-op that logs what it would do.
     /// On Linux, it creates the wg0 interface, assigns the overlay IP, and brings it up.
     pub fn setup(name: &str, listen_port: u16, overlay_ip: Ipv4Addr) -> Result<Self, WgError> {
@@ -120,14 +134,27 @@ impl WgInterface {
             overlay_ip,
         })
     }
+}
 
-    /// Add a WireGuard peer.
-    pub fn add_peer(
+impl TunnelDriver for WgInterface {
+    fn public_key(&self) -> &str {
+        &self.keypair.public_key
+    }
+
+    fn overlay_ip(&self) -> Ipv4Addr {
+        self.overlay_ip
+    }
+
+    fn interface_name(&self) -> &str {
+        &self.name
+    }
+
+    fn add_peer(
         &self,
         pubkey: &str,
         endpoint: Option<&str>,
         allowed_ip: Ipv4Addr,
-    ) -> Result<(), WgError> {
+    ) -> anyhow::Result<()> {
         let allowed = format!("{allowed_ip}/32");
 
         if cfg!(target_os = "linux") {
@@ -145,8 +172,7 @@ impl WgInterface {
         Ok(())
     }
 
-    /// Update a peer's endpoint address.
-    pub fn update_peer_endpoint(&self, pubkey: &str, endpoint: &str) -> Result<(), WgError> {
+    fn update_peer_endpoint(&self, pubkey: &str, endpoint: &str) -> anyhow::Result<()> {
         if cfg!(target_os = "linux") {
             run_cmd(
                 "wg",
@@ -159,8 +185,7 @@ impl WgInterface {
         Ok(())
     }
 
-    /// Remove a WireGuard peer.
-    pub fn remove_peer(&self, pubkey: &str) -> Result<(), WgError> {
+    fn remove_peer(&self, pubkey: &str) -> anyhow::Result<()> {
         if cfg!(target_os = "linux") {
             run_cmd("wg", &["set", &self.name, "peer", pubkey, "remove"])?;
             info!(peer = pubkey, "WireGuard peer removed");
@@ -170,8 +195,7 @@ impl WgInterface {
         Ok(())
     }
 
-    /// Tear down the WireGuard interface.
-    pub fn teardown(&self) -> Result<(), WgError> {
+    fn teardown(&self) -> anyhow::Result<()> {
         if cfg!(target_os = "linux") {
             run_cmd("ip", &["link", "del", &self.name])?;
             info!(interface = %self.name, "WireGuard interface removed");

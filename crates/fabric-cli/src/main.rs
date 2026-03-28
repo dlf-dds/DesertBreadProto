@@ -58,7 +58,7 @@ fn print_status(v: &Value) {
     println!("  Node ID:      {}", v["node_id"].as_str().unwrap_or("?"));
     println!("  Overlay IP:   {}", v["overlay_ip"].as_str().unwrap_or("?"));
     println!("  Peers:        {}", v["peer_count"]);
-    println!("  WG Interface: {}", v["wg_interface"].as_str().unwrap_or("?"));
+    println!("  Tunnel:       {}", v["tunnel_interface"].as_str().unwrap_or("?"));
     println!(
         "  SPIRE:        {}",
         if v["spire_enabled"].as_bool().unwrap_or(false) {
@@ -73,7 +73,7 @@ fn print_peers(v: &Value) {
     let peers = v["peers"].as_array();
     match peers {
         Some(peers) if !peers.is_empty() => {
-            println!("{:<44} {:<18} {:<10} WG PUBKEY", "NODE ID", "OVERLAY IP", "STATUS");
+            println!("{:<44} {:<18} {:<10} TUNNEL KEY", "NODE ID", "OVERLAY IP", "STATUS");
             println!("{}", "-".repeat(100));
             for p in peers {
                 let status = if p["connected"].as_bool().unwrap_or(false) {
@@ -86,7 +86,7 @@ fn print_peers(v: &Value) {
                     p["node_id"].as_str().unwrap_or("?"),
                     p["overlay_ip"].as_str().unwrap_or("?"),
                     status,
-                    p["wg_pubkey"].as_str().unwrap_or("?"),
+                    p["tunnel_pubkey"].as_str().unwrap_or("?"),
                 );
             }
         }
@@ -99,7 +99,7 @@ fn print_identity(v: &Value) {
     println!("=============");
     println!("  Node ID:    {}", v["node_id"].as_str().unwrap_or("?"));
     println!("  Overlay IP: {}", v["overlay_ip"].as_str().unwrap_or("?"));
-    println!("  WG Pubkey:  {}", v["wg_pubkey"].as_str().unwrap_or("?"));
+    println!("  Tunnel Key: {}", v["tunnel_pubkey"].as_str().unwrap_or("?"));
 }
 
 #[tokio::main]

@@ -1,7 +1,10 @@
 //! Peer state management.
 //!
-//! Tracks known mesh peers: their iroh identity, WireGuard public key,
+//! Tracks known mesh peers: their iroh identity, tunnel public key,
 //! overlay IP, connection status, and last-seen timestamp.
+//!
+//! Field names use `tunnel_` prefix (not `wg_`) because the mesh protocol is
+//! tunnel-agnostic — see [`crate::tunnel::TunnelDriver`] for the design rationale.
 
 use iroh::EndpointId;
 use serde::{Deserialize, Serialize};
@@ -13,23 +16,27 @@ use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 /// Wire protocol message exchanged between peers over iroh.
+///
+/// These fields are tunnel-agnostic: `tunnel_pubkey` and `tunnel_endpoint` are
+/// opaque strings whose meaning depends on the active [`TunnelDriver`](crate::tunnel::TunnelDriver).
+/// For WireGuard, the pubkey is a base64 Curve25519 key and the endpoint is `ip:port`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerHandshake {
-    /// WireGuard public key (base64)
-    pub wg_pubkey: String,
+    /// Tunnel public key — opaque to the mesh protocol, interpreted by the tunnel driver
+    pub tunnel_pubkey: String,
     /// Overlay IP derived from iroh EndpointId
     pub overlay_ip: Ipv4Addr,
-    /// Optional WireGuard endpoint (ip:port) for direct connection
-    pub wg_endpoint: Option<String>,
+    /// Optional tunnel endpoint (e.g., `ip:port`) for direct connection
+    pub tunnel_endpoint: Option<String>,
 }
 
 /// Information about a known peer.
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
     pub endpoint_id: EndpointId,
-    pub wg_pubkey: String,
+    pub tunnel_pubkey: String,
     pub overlay_ip: Ipv4Addr,
-    pub wg_endpoint: Option<String>,
+    pub tunnel_endpoint: Option<String>,
     pub last_seen: Instant,
     pub connected: bool,
 }
@@ -54,9 +61,9 @@ impl PeerTable {
 
         let info = PeerInfo {
             endpoint_id,
-            wg_pubkey: handshake.wg_pubkey,
+            tunnel_pubkey: handshake.tunnel_pubkey,
             overlay_ip: handshake.overlay_ip,
-            wg_endpoint: handshake.wg_endpoint,
+            tunnel_endpoint: handshake.tunnel_endpoint,
             last_seen: Instant::now(),
             connected: true,
         };

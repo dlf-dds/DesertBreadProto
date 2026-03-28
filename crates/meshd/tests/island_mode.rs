@@ -12,9 +12,7 @@ use iroh::{Endpoint, EndpointAddr, RelayMode, SecretKey, TransportAddr};
 use meshd::overlay_ip::overlay_ip_from_id;
 use meshd::peer::{PeerHandshake, PeerTable};
 use meshd::protocol::{MeshProtocol, MESH_ALPN};
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use tokio::time::timeout;
 
 struct TestNode {
@@ -48,13 +46,12 @@ async fn spawn_node(name: &str) -> TestNode {
 
     let peers = PeerTable::new();
     let handshake = PeerHandshake {
-        wg_pubkey: format!("wg-{name}"),
+        tunnel_pubkey: format!("tunnel-{name}"),
         overlay_ip,
-        wg_endpoint: None,
+        tunnel_endpoint: None,
     };
 
-    let wg = Arc::new(RwLock::new(None));
-    let protocol = MeshProtocol::new(peers.clone(), handshake, wg);
+    let protocol = MeshProtocol::new(peers.clone(), handshake, None);
 
     let router = Router::builder(endpoint.clone())
         .accept(MESH_ALPN, protocol.clone())
