@@ -16,8 +16,8 @@ A self-healing, identity-based mesh network for tactical edge operations. Runs e
 ## Key Components
 
 | Crate | Purpose |
-|---|---|
-| `meshd` | iroh-WireGuard bridge daemon (~500 lines of glue) |
+| --- | --- |
+| `meshd` | iroh–tunnel bridge daemon. Tunnel tech is pluggable via `TunnelDriver` trait (`tunnel.rs`); WireGuard is the current driver (`wireguard.rs`) |
 | `provision` | Node provisioning tool (generates bundles, flashes config) |
 | `fabric-cli` | Operator CLI for mesh status, debugging, manual overrides |
 

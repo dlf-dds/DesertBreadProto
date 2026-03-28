@@ -68,7 +68,7 @@ graph TB
 
     subgraph OVERLAY["IP OVERLAY PLANE"]
         WG["WireGuard (wg0)<br/>Kernel tunnel interface<br/>Deterministic IPs (100.64.0.0/10)"]
-        MESHD_WG["meshd<br/>Dynamic peer management<br/>add/remove WG peers"]
+        MESHD_WG["meshd<br/>Dynamic peer management<br/>add/remove tunnel peers"]
     end
 
     subgraph CONNECTION["CONNECTION PLANE"]
@@ -131,7 +131,7 @@ Key point: mission traffic never leaves the edge. Cloud relays only assist with 
 
 ## 2. meshd Architecture
 
-`meshd` is the only custom daemon (~500 lines of Rust). It bridges iroh's QUIC connections to a WireGuard IP overlay. All other components are proven open-source software used as-is.
+`meshd` is the only custom daemon (~500 lines of Rust). It bridges iroh's QUIC connections to an IP tunnel overlay (currently WireGuard, but the tunnel technology is pluggable via the `TunnelDriver` trait in `tunnel.rs`). All other components are proven open-source software used as-is.
 
 ```mermaid
 graph TB
@@ -141,7 +141,8 @@ graph TB
         PROTO["protocol.rs<br/>MeshProtocol handler<br/>ALPN: desert-bread/mesh/0"]
         DISC["discovery.rs<br/>mDNS subscription<br/>Peer lifecycle events"]
         PEER["peer.rs<br/>PeerTable<br/>Arc&lt;RwLock&lt;HashMap&gt;&gt;"]
-        WG_MOD["wireguard.rs<br/>WgInterface<br/>wg set / ip link"]
+        TUNNEL["tunnel.rs<br/>TunnelDriver trait<br/>Pluggable tunnel tech"]
+        WG_MOD["wireguard.rs<br/>impl TunnelDriver<br/>wg set / ip link"]
         IPC_MOD["ipc.rs<br/>Unix socket server<br/>JSON-over-socket"]
         OIP["overlay_ip.rs<br/>SHA-256 → 100.64.x.x"]
         SPIRE_MOD["spire.rs<br/>SPIRE Workload API<br/>(Phase 2)"]
@@ -152,7 +153,8 @@ graph TB
     IROH_MDNS["iroh mDNS<br/>MdnsAddressLookup"] -->|"Discovered/Expired"| DISC
     DISC -->|"initiate handshake"| PROTO
     PROTO -->|"upsert/remove"| PEER
-    PROTO -->|"add_peer/remove_peer"| WG_MOD
+    PROTO -->|"add_peer/remove_peer"| TUNNEL
+    TUNNEL -->|"impl"| WG_MOD
     WG_MOD -->|"wg set wg0"| KERNEL["Linux Kernel<br/>WireGuard module"]
     IPC_MOD -->|"query peer state"| PEER
     MAIN -->|"spawns tasks"| DISC
@@ -178,8 +180,8 @@ graph TB
 │  │  Shutdown    │  │  mesh/0      │  │    our_id < peer  │  │
 │  │              │  │              │  │  On Expired:       │  │
 │  │  Spawns:     │  │  accept()    │  │    mark offline   │  │
-│  │  • discovery │  │  handshake_  │  │    remove WG peer │  │
-│  │  • ipc       │  │  outbound()  │  │                   │  │
+│  │  • discovery │  │  handshake_  │  │    remove tunnel  │  │
+│  │  • ipc       │  │  outbound()  │  │    peer           │  │
 │  └──────┬───────┘  └──────┬───────┘  └────────┬──────────┘  │
 │         │                 │                    │              │
 │  ┌──────▼─────────────────▼────────────────────▼──────────┐  │
@@ -189,13 +191,16 @@ graph TB
 │  └──────────────────────┬─────────────────────────────────┘  │
 │                         │                                    │
 │  ┌──────────────────────▼──────────┐  ┌────────────────┐     │
-│  │         wireguard.rs            │  │  overlay_ip.rs │     │
-│  │  WgInterface::setup()           │  │                │     │
-│  │  add_peer() · remove_peer()     │  │  SHA-256 hash  │     │
-│  │  update_peer_endpoint()         │  │  → 22-bit host │     │
-│  │                                 │  │  → 100.64.x.x  │     │
-│  │  Shells out to: wg, ip          │  └────────────────┘     │
-│  │  No-op on macOS (dev mode)      │                         │
+│  │  tunnel.rs (TunnelDriver trait) │  │  overlay_ip.rs │     │
+│  │  add_peer() · remove_peer()     │  │                │     │
+│  │  update_peer_endpoint()         │  │  SHA-256 hash  │     │
+│  │  teardown() · public_key()      │  │  → 22-bit host │     │
+│  │         ┌───────────────────┐   │  │  → 100.64.x.x  │     │
+│  │         │ wireguard.rs      │   │  └────────────────┘     │
+│  │         │ impl TunnelDriver │   │                         │
+│  │         │ Shells: wg, ip    │   │                         │
+│  │         │ No-op on macOS    │   │                         │
+│  │         └───────────────────┘   │                         │
 │  └────────────┬────────────────────┘  ┌────────────────────┐ │
 │               │                       │     ipc.rs         │ │
 │               ▼                       │  Unix socket       │ │
@@ -216,12 +221,13 @@ graph TB
 ### Module responsibilities
 
 | Module | Lines | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `main.rs` | ~100 | Entry point: key persistence, endpoint setup, router, task spawning, shutdown |
-| `protocol.rs` | ~130 | `ProtocolHandler` impl: accept inbound + initiate outbound handshakes |
+| `tunnel.rs` | ~60 | `TunnelDriver` trait: pluggable tunnel abstraction (WireGuard, MASQUE, etc.) |
+| `wireguard.rs` | ~100 | `impl TunnelDriver` for WireGuard via `wg` and `ip` CLI tools; no-op on macOS |
+| `protocol.rs` | ~130 | `ProtocolHandler` impl: accept inbound + initiate outbound handshakes (tunnel-agnostic) |
 | `discovery.rs` | ~50 | mDNS event loop: peer discovered → handshake, peer expired → cleanup |
 | `peer.rs` | ~60 | Thread-safe peer table with CRUD operations |
-| `wireguard.rs` | ~100 | Shell out to `wg` and `ip` CLI tools; no-op on macOS |
 | `overlay_ip.rs` | ~30 | Deterministic IP from SHA-256 of public key |
 | `ipc.rs` | ~160 | Unix socket server, JSON request/response protocol |
 | `spire.rs` | ~30 | Stub: SPIRE Workload API client (Phase 2) |
@@ -328,7 +334,7 @@ New peer discovered
 
 ## 4. Peer Handshake Protocol
 
-When two nodes discover each other, they perform a handshake over iroh's authenticated QUIC channel. The handshake exchanges WireGuard public keys and overlay IPs. After the handshake, `meshd` configures the kernel WireGuard interface to allow direct IP communication.
+When two nodes discover each other, they perform a handshake over iroh's authenticated QUIC channel. The handshake exchanges tunnel public keys and overlay IPs (tunnel-agnostic — `tunnel_pubkey` and `tunnel_endpoint` are opaque strings interpreted by the active `TunnelDriver`). After the handshake, `meshd` configures the tunnel interface to allow direct IP communication.
 
 ALPN protocol: `desert-bread/mesh/0`
 
@@ -345,16 +351,16 @@ sequenceDiagram
 
     Note over A,B: Bidirectional stream opened
 
-    A->>B: PeerHandshake {<br/>  wg_pubkey: "A's WG key",<br/>  overlay_ip: 100.64.x.x,<br/>  wg_endpoint: Option<addr><br/>}
-    B->>A: PeerHandshake {<br/>  wg_pubkey: "B's WG key",<br/>  overlay_ip: 100.64.y.y,<br/>  wg_endpoint: Option<addr><br/>}
+    A->>B: PeerHandshake {<br/>  tunnel_pubkey: "A's key",<br/>  overlay_ip: 100.64.x.x,<br/>  tunnel_endpoint: Option<addr><br/>}
+    B->>A: PeerHandshake {<br/>  tunnel_pubkey: "B's key",<br/>  overlay_ip: 100.64.y.y,<br/>  tunnel_endpoint: Option<addr><br/>}
 
     Note over A: peers.upsert(B.id, B.handshake)
     Note over B: peers.upsert(A.id, A.handshake)
 
-    Note over A: wg set wg0 peer B.wg_pubkey<br/>endpoint B.addr allowed-ips B.overlay_ip/32
-    Note over B: wg set wg0 peer A.wg_pubkey<br/>endpoint A.addr allowed-ips A.overlay_ip/32
+    Note over A: tunnel.add_peer(B.tunnel_pubkey,<br/>B.addr, B.overlay_ip/32)
+    Note over B: tunnel.add_peer(A.tunnel_pubkey,<br/>A.addr, A.overlay_ip/32)
 
-    Note over A,B: WireGuard overlay now active<br/>Nodes can SSH, ping, run ATAK, etc.
+    Note over A,B: Tunnel overlay now active<br/>Nodes can SSH, ping, run ATAK, etc.
 ```
 
 ```
@@ -369,21 +375,20 @@ Node A (initiator)                    iroh QUIC                     Node B (resp
  open_bi() ───────────────────── bidirectional stream ───────────►
 
  send PeerHandshake ──────────── postcard binary ────────────────► recv PeerHandshake
-   { wg_pubkey, overlay_ip }                                       deserialize A's info
+   { tunnel_pubkey, overlay_ip }                                    deserialize A's info
 
                                  ◄──── postcard binary ────────── send PeerHandshake
- recv PeerHandshake                                                 { wg_pubkey, overlay_ip }
+ recv PeerHandshake                                                 { tunnel_pubkey, overlay_ip }
  deserialize B's info
 
  peers.upsert(B)                                                   peers.upsert(A)
- wg set wg0 peer B.wg_pubkey                                      wg set wg0 peer A.wg_pubkey
-   endpoint B.addr                                                   endpoint A.addr
-   allowed-ips B.overlay_ip/32                                       allowed-ips A.overlay_ip/32
+ tunnel.add_peer(B.tunnel_pubkey,                                  tunnel.add_peer(A.tunnel_pubkey,
+   B.addr, B.overlay_ip/32)                                          A.addr, A.overlay_ip/32)
 
  conn.close(0, "done") ─────────────────────────────────────────►  stream completes
 
  ═══════════════════════════════════════════════════════════════════════════════
-                 WireGuard overlay now active between A and B
+                 Tunnel overlay now active between A and B
                  SSH, ping, ATAK, Zenoh — all work over 100.64.x.x
  ═══════════════════════════════════════════════════════════════════════════════
 ```
@@ -408,7 +413,7 @@ Result: exactly one handshake per peer pair
 
 ## 5. IP Overlay (WireGuard)
 
-WireGuard provides the IP-layer overlay. It is NOT the mesh — iroh is the mesh. WireGuard is a utility layer bootstrapped by iroh so that legacy IP-based tools work over the mesh.
+The IP tunnel provides the overlay. It is NOT the mesh — iroh is the mesh. The tunnel is a utility layer bootstrapped by iroh so that legacy IP-based tools work over the mesh. The tunnel technology is pluggable via `TunnelDriver` (see `tunnel.rs`). WireGuard is the current production driver; MASQUE over iroh or userspace WireGuard are possible future alternatives.
 
 ```mermaid
 graph TB
@@ -475,13 +480,13 @@ graph TB
 │          meshd (bridge daemon)                       │
 │                                                      │
 │  On peer discovered:                                 │
-│    1. Exchange WG pubkeys over iroh QUIC             │
+│    1. Exchange tunnel pubkeys over iroh QUIC         │
 │    2. Compute peer's overlay IP from iroh pubkey     │
-│    3. wg set wg0 peer <pubkey> endpoint <addr>       │
-│       allowed-ips <overlay-ip>/32                    │
+│    3. tunnel.add_peer(pubkey, endpoint, overlay_ip)  │
+│       (dispatches to active TunnelDriver impl)       │
 │                                                      │
 │  On peer lost:                                       │
-│    1. wg set wg0 peer <pubkey> remove                │
+│    1. tunnel.remove_peer(pubkey)                     │
 │    2. Remove from peer table                         │
 └──────────────────────┬──────────────────────────────┘
                        │ QUIC connections
@@ -494,9 +499,9 @@ graph TB
 ### What meshd manages vs what it doesn't
 
 | meshd manages | meshd does NOT manage |
-|---|---|
-| WireGuard peer entries (add/remove) | WireGuard interface creation (done at boot) |
-| Peer WG key exchange (over iroh) | WireGuard keypair generation (done at provisioning) |
+| --- | --- |
+| Tunnel peer entries via `TunnelDriver` (add/remove) | Tunnel interface creation (done at startup via driver constructor) |
+| Peer tunnel key exchange (over iroh) | Tunnel keypair generation (driver-specific) |
 | Overlay IP computation | IP routing tables |
 | Peer discovery lifecycle | Application-layer data |
 | IPC for fabric-cli queries | TLS/mTLS (that's SPIRE's job) |

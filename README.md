@@ -86,7 +86,7 @@ graph TB
 ### How It Works
 
 1. **iroh** discovers peers on the local LAN via mDNS (no server, no internet) or via cloud relay servers for cross-NAT connectivity
-2. **meshd** bridges iroh's QUIC connections to a WireGuard IP overlay — peers exchange WG public keys over iroh's authenticated channel, then meshd configures the kernel WireGuard interface dynamically
+2. **meshd** bridges iroh's QUIC connections to an IP tunnel overlay — peers exchange tunnel keys over iroh's authenticated channel, then meshd configures the tunnel interface (currently WireGuard, pluggable via `TunnelDriver` trait in `tunnel.rs`) dynamically
 3. **Zenoh** provides structured pub/sub and distributed storage over the WireGuard overlay, with anti-entropy reconciliation when partitioned sites reconnect
 4. **SPIRE** issues short-lived X.509 certificates to every workload, enabling mTLS on all connections. Each site has its own CA — sovereign when disconnected, federated when connected
 5. **NORM** handles bulk LAN multicast (firmware, map tiles) via UDP multicast with FEC
@@ -244,14 +244,15 @@ Deploys iroh relay servers to 3 AWS regions:
 ├── CLAUDE.md                    # Project conventions for AI-assisted dev
 ├── Cargo.toml                   # Rust workspace root
 ├── crates/
-│   ├── meshd/                   # iroh-WireGuard bridge daemon
+│   ├── meshd/                   # iroh–tunnel bridge daemon
 │   │   └── src/
 │   │       ├── main.rs          # Daemon entry point
+│   │       ├── tunnel.rs        # TunnelDriver trait (swap WG for MASQUE, etc.)
+│   │       ├── wireguard.rs     # WireGuard TunnelDriver implementation
 │   │       ├── discovery.rs     # mDNS + relay peer discovery
-│   │       ├── protocol.rs      # Mesh handshake protocol
+│   │       ├── protocol.rs      # Mesh handshake protocol (tunnel-agnostic)
 │   │       ├── peer.rs          # Peer state table
-│   │       ├── overlay_ip.rs    # Deterministic IP assignment
-│   │       └── wireguard.rs     # WireGuard interface management
+│   │       └── overlay_ip.rs    # Deterministic IP assignment
 │   ├── provision/               # Node provisioning tool
 │   └── fabric-cli/              # Operator CLI
 ├── terraform/
