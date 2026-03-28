@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 /// Default IPC socket path.
 pub const DEFAULT_SOCKET_PATH: &str = "/var/run/meshd/meshd.sock";

@@ -142,10 +142,7 @@ pub fn list(dir: &str) -> Result<()> {
         return Ok(());
     }
 
-    println!(
-        "{:<20} {:<6} {:<10} {:<18} {:<44} {}",
-        "HOSTNAME", "ROLE", "SITE", "OVERLAY IP", "IROH ID", "TRUST DOMAIN"
-    );
+    println!("{:<20} {:<6} {:<10} {:<18} {:<44} TRUST DOMAIN", "HOSTNAME", "ROLE", "SITE", "OVERLAY IP", "IROH ID");
     println!("{}", "-".repeat(140));
 
     for entry in std::fs::read_dir(path)? {

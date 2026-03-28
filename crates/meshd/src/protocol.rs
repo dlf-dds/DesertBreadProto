@@ -111,6 +111,11 @@ impl ProtocolHandler for MeshProtocol {
             .map_err(|e| AcceptError::from_err(e))?;
         send.finish().map_err(|e| AcceptError::from_err(e))?;
 
+        // Wait for the peer to receive our response before the connection drops
+        send.stopped()
+            .await
+            .ok();
+
         // Register peer and configure WireGuard
         let is_new = self.peers.upsert(remote_id, remote_hs.clone()).await;
         if is_new {

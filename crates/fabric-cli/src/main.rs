@@ -73,10 +73,7 @@ fn print_peers(v: &Value) {
     let peers = v["peers"].as_array();
     match peers {
         Some(peers) if !peers.is_empty() => {
-            println!(
-                "{:<44} {:<18} {:<10} {}",
-                "NODE ID", "OVERLAY IP", "STATUS", "WG PUBKEY"
-            );
+            println!("{:<44} {:<18} {:<10} WG PUBKEY", "NODE ID", "OVERLAY IP", "STATUS");
             println!("{}", "-".repeat(100));
             for p in peers {
                 let status = if p["connected"].as_bool().unwrap_or(false) {
