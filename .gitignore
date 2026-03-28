@@ -1,3 +1,6 @@
+# Generated exports
+*.pdf
+
 # Secrets
 .env
 .env.local
