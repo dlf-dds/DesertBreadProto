@@ -6,26 +6,78 @@ Cloud infrastructure, when reachable, adds efficiency: geographic relay for cros
 
 ## Architecture
 
-Four decoupled planes, each independently functional:
+Four decoupled planes, each independently functional. See [docs/architecture-diagrams.md](docs/architecture-diagrams.md) for comprehensive diagrams (14 Mermaid + ASCII diagrams covering every subsystem).
 
+```mermaid
+graph TB
+    subgraph CLOUD["CLOUD (accelerant, not foundation)"]
+        direction LR
+        CF["Cloudflare DNS"]
+        RELAY["iroh Relays<br/>FRA · ISR · MUM"]
+        SPIRE_C["SPIRE Cloud CA"]
+        ZENOH_C["Zenoh Router"]
+    end
+
+    subgraph DATA["DATA PLANE"]
+        ZENOH["Zenoh Pub/Sub + Storage"]
+        NORM["NORM Multicast (LAN)"]
+    end
+
+    subgraph IDENTITY["IDENTITY PLANE"]
+        SPIRE["SPIRE (per-site CA)"]
+        KANIDM["Kanidm (human auth)"]
+    end
+
+    subgraph OVERLAY["IP OVERLAY PLANE"]
+        WG["WireGuard (wg0)<br/>100.64.0.0/10"]
+        MESHD["meshd<br/>dynamic peer mgmt"]
+    end
+
+    subgraph CONNECTION["CONNECTION PLANE"]
+        IROH["iroh QUIC P2P"]
+        MDNS["mDNS Discovery"]
+    end
+
+    ZENOH -->|"mTLS"| SPIRE
+    ZENOH -->|"runs over"| WG
+    MESHD -->|"manages"| WG
+    IROH -->|"keys exchanged via"| MESHD
+    IROH -->|"discovers"| MDNS
+    IROH -.->|"relay fallback"| RELAY
+    SPIRE -.->|"federation"| SPIRE_C
+    ZENOH -.->|"cross-site sync"| ZENOH_C
+
+    style CLOUD fill:#e3f2fd,stroke:#1565c0,color:#000
+    style DATA fill:#e8f5e9,stroke:#2e7d32,color:#000
+    style IDENTITY fill:#f3e5f5,stroke:#6a1b9a,color:#000
+    style OVERLAY fill:#fff3e0,stroke:#e65100,color:#000
+    style CONNECTION fill:#fce4ec,stroke:#b71c1c,color:#000
 ```
-┌─────────────────────────────────────────────────────────┐
-│  DATA PLANE (Zenoh + NORM)                              │
-│  Pub/sub data fabric with anti-entropy reconciliation   │
-│  + reliable LAN multicast for bulk distribution         │
-├─────────────────────────────────────────────────────────┤
-│  IDENTITY PLANE (SPIRE/SPIFFE + Kanidm)                 │
-│  Per-site sovereign CA with federation                  │
-│  mTLS everywhere, zero static secrets                   │
-├─────────────────────────────────────────────────────────┤
-│  IP OVERLAY PLANE (WireGuard)                           │
-│  Raw kernel WireGuard, peers managed by meshd           │
-│  Deterministic IPs from public key (100.64.0.0/10)     │
-├─────────────────────────────────────────────────────────┤
-│  CONNECTION PLANE (iroh)                                │
-│  QUIC P2P, mDNS local discovery, relay NAT traversal   │
-│  Content-addressed sync, gossip, multipath failover     │
-└─────────────────────────────────────────────────────────┘
+
+```text
+┌──────────────────────────────────────────────────────────────────────┐
+│           CLOUD INFRASTRUCTURE (accelerant, not foundation)          │
+│                                                                      │
+│  Cloudflare DNS     iroh Relays (FRA/ISR/MUM)    SPIRE Cloud CA     │
+│  desertbread.net    NAT traversal + fallback      Federation hub     │
+│                     Zenoh Cloud Router (cross-site aggregation)       │
+└──────────────────────────────────┬───────────────────────────────────┘
+                                   │ only when internet available
+┌──────────────────────────────────▼───────────────────────────────────┐
+│  DATA PLANE (Zenoh + NORM)                                           │
+│  Pub/sub with anti-entropy reconciliation + reliable LAN multicast   │
+├──────────────────────────────────────────────────────────────────────┤
+│  IDENTITY PLANE (SPIRE/SPIFFE + Kanidm)                              │
+│  Per-site sovereign CA with federation · mTLS everywhere             │
+├──────────────────────────────────────────────────────────────────────┤
+│  IP OVERLAY PLANE (WireGuard)                                        │
+│  Raw kernel WireGuard · peers managed dynamically by meshd           │
+│  Deterministic IPs from public key (100.64.0.0/10 CGNAT)            │
+├──────────────────────────────────────────────────────────────────────┤
+│  CONNECTION PLANE (iroh)                                             │
+│  QUIC P2P · mDNS local discovery · relay NAT traversal              │
+│  Ed25519 identity · multipath failover · gossip + blobs             │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ### How It Works
@@ -43,6 +95,77 @@ Four decoupled planes, each independently functional:
 - **Self-healing.** Partitioned sites reconcile automatically when reconnected.
 - **Pre-provisioned.** Nodes are enrolled before deployment. Field enrollment is a first-class backup.
 - **Minimal custom code.** `meshd` (~500 lines) is the only custom daemon. Everything else is proven open-source.
+
+### Multi-Site Topology
+
+```text
+                        ┌─────────────────────────────────────────┐
+                        │         CLOUD (AWS + Cloudflare)         │
+                        │                                         │
+                        │  Cloudflare DNS     iroh Relays          │
+                        │  desertbread.net    FRA · ISR · MUM      │
+                        │                                         │
+                        │  SPIRE Cloud CA     Zenoh Cloud Router   │
+                        │  cloud.desertbread  cross-site storage   │
+                        └─────────┬───────────────┬───────────────┘
+                                  │               │
+                    iroh relay    │               │  iroh relay
+                    (cross-NAT)   │               │  (cross-NAT)
+                                  │               │
+    ┌─────────────────────────────▼───┐   ┌───────▼─────────────────────────┐
+    │      SITE ALPHA — Command Post  │   │  SITE BRAVO — Forward Observer  │
+    │                                 │   │                                 │
+    │  ┌───────────────────────────┐  │   │  ┌───────────────────────────┐  │
+    │  │ CP: NVIDIA AGX Orin       │  │   │  │ CP: NVIDIA AGX Orin       │  │
+    │  │ • SPIRE Server (site CA)  │  │   │  │ • SPIRE Server (site CA)  │  │
+    │  │ • Zenoh Router + Storage  │◄─┼───┼─►│ • Zenoh Router + Storage  │  │
+    │  │ • Kanidm Replica          │  │   │  │                           │  │
+    │  │ • meshd (iroh + WG)       │  │   │  │ • meshd (iroh + WG)       │  │
+    │  └──────────┬────────────────┘  │   │  └──────────┬────────────────┘  │
+    │             │ Ethernet/WiFi LAN │   │             │ Ethernet LAN      │
+    │  ┌──────┐ ┌┴─────┐ ┌──────┐    │   │  ┌──────┐ ┌┴─────┐             │
+    │  │MFT-01│ │MFT-02│ │MFT-03│    │   │  │MFT-04│ │MFT-05│             │
+    │  │RPi 5 │ │RPi 5 │ │RPi 5 │    │   │  │RPi 5 │ │RPi 5 │             │
+    │  │EO/IR │ │Radar │ │Fires │    │   │  │SIGINT│ │EO/IR │             │
+    │  └──────┘ └──────┘ └──────┘    │   │  └──────┘ └──────┘             │
+    │                                 │   │                                 │
+    │  Trust: alpha.desertbread.net   │   │  Trust: bravo.desertbread.net   │
+    └─────────────────────────────────┘   └─────────────────────────────────┘
+```
+
+### Data Flow: Sensor to Decision
+
+```text
+MFT-01 (EO/IR Sensor)          CP (AGX Orin)                  MFT-03 (Fires)
+────────────────────            ──────────────                 ──────────────
+
+1. Sensor detects target
+   │
+   ▼
+2. Zenoh publish:
+   alpha/sensor/eo-ir/01
+   │
+   │ WireGuard tunnel
+   │ 100.64.x.x → 100.64.y.y
+   │
+   └──────────────────────────► 3. Fusion engine correlates
+                                   with radar, SIGINT
+                                   │
+                                   ▼
+                                4. Zenoh publish:
+                                   alpha/c2/tracks/fused
+                                   │
+                                   ▼
+                                5. C2 operator sees track,
+                                   authorizes engagement
+                                   │
+                                   │ WireGuard tunnel
+                                   │ 100.64.y.y → 100.64.z.z
+                                   │
+                                   └────────────────────────► 6. Fires system executes
+
+Encryption: iroh QUIC (TLS 1.3) + WireGuard (ChaCha20) + Zenoh mTLS (SPIRE)
+```
 
 ## Components
 
@@ -114,7 +237,7 @@ Deploys iroh relay servers to 3 AWS regions:
 
 ## Repository Structure
 
-```
+```text
 ├── CLAUDE.md                    # Project conventions for AI-assisted dev
 ├── Cargo.toml                   # Rust workspace root
 ├── crates/
